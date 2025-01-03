@@ -291,10 +291,10 @@ if len(sys.argv) < 3:
 WORKSPACE = sys.argv[1]
 DEST_FOLDER_ROOT = sys.argv[2]
 if not os.path.isdir(WORKSPACE):
-    print('Provided workspace does not exist.')
+    print(f'Provided workspace does not exist: {WORKSPACE}')
     exit(-1)
 if not os.path.isdir(DEST_FOLDER_ROOT):
-    print('Provided dest folder root does not exist.')
+    print(f'Provided dest folder root does not exist: {DEST_FOLDER_ROOT}')
     exit(-1)
 
 # Check environment
