@@ -24,15 +24,15 @@ def execute(cmd: str, quiet=False) -> bool:
 
 def download_mega(url: str, folder: str) -> bool:
     print('Logging out on MEGA...')
-    if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-logout.bat")}"'):
+    if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-logout")}"'):
         return False
     
     print('Loging into MEGA folder...')
-    if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-login.bat")}" {url}'):
+    if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-login")}" {url}'):
         return False
 
     print('Downloading files...')
-    if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-get.bat")}" * "{folder}"'):
+    if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-get")}" * "{folder}"'):
         return False
     
     print('Archive downloaded.')
@@ -299,7 +299,7 @@ if not os.path.isdir(DEST_FOLDER_ROOT):
 
 # Check environment
 print('NOTE: You can set 7z and mega path by setting SEVENZIP_PATH and MEGACMD_FOLDER environment variables.')
-SEVENZIP_PATH = '7z.exe'
+SEVENZIP_PATH = '7zz'
 MEGACMD_FOLDER = ''
 
 env_7z_path = os.environ.get('SEVENZIP_PATH', '')
