@@ -200,7 +200,6 @@ class Task:
                 self.__update_status(STATUS_EXTRACTED)
                 return True
             
-
     def copy(self):
         if self.status != STATUS_EXTRACTED:
             print(f'Cannot perform copy when status is [{self.status}].')
@@ -220,12 +219,11 @@ class Task:
         
         for file in os.listdir(self.content_folder):
             file_path = os.path.join(self.content_folder, file)
-            try:
-                if os.path.isdir(file_path):
-                    shutil.copytree(file_path, dest_folder)
-                else:
-                    shutil.copy(file_path, dest_folder)
-            except:
+            if os.name == 'nt':
+                result = execute(f'xcopy "{file_path}" "{dest_folder}" /E/H/Y')
+            else:
+                result = execute(f'cp -r "{file_path}" "{dest_folder}"')
+            if not result:
                 print(f'Failed copying [{file}].')
                 return False
             
