@@ -269,7 +269,7 @@ def task_operations(task: Task) -> bool:
             else:
                 task.delete()
                 print('Task deleted. Exitting.')
-                return True
+                return False
         else:
             print(f'Running failed. Status: {task.status}. Please check logs and temp files.')
             return True
