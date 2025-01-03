@@ -32,7 +32,7 @@ def download_mega(url: str, folder: str) -> bool:
         return False
 
     print('Downloading files...')
-    if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-get")}" * "{folder}"'):
+    if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-get")}" "*" "{folder}"'):
         return False
     
     print('Archive downloaded.')
