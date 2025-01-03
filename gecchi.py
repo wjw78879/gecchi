@@ -195,7 +195,8 @@ class Task:
                     if not extract(file_path, self.content_folder):
                         print(f'Failed extracting file [{file_name}]. Maybe password incorrect?')
                         return False
-                    os.remove(file_path) # Remove after successfull extraction
+                    #os.remove(file_path) # Remove after successfull extraction
+                    shutil.move(file_path, self.folder) # Move to outer side
             if not has_archive:
                 self.__update_status(STATUS_EXTRACTED)
                 return True
@@ -261,9 +262,14 @@ def task_operations(task: Task) -> bool:
     text = input('Select one option (1 ~ 5): ')
     if text == '1':
         if task.run():
-            print('Gecchi success! Clearing temp.')
+            print('Gecchi success!')
             task.delete()
-            return False
+            if input('Clear temp? Enter "y" to confirm delete: ') == 'y':
+                task.delete()
+                print('Task deleted.')
+                return False
+            else:
+                return True
         else:
             print(f'Running failed. Status: {task.status}. Please check logs and temp files.')
             return True
