@@ -14,6 +14,7 @@ STATUS_DONE = 'Done'
 CONTENT_FOLDER = 'content'
 
 PASSWORDS = ['⑨']
+ARCHIVE_FORMATS = ['.jpg', '.7z', '.zip', '.rar']
 
 def execute(cmd: str, quiet=False) -> bool:
     result = subprocess.run(cmd, capture_output=not quiet, text=True, shell=True)
@@ -39,6 +40,14 @@ def download_mega(url: str, folder: str) -> bool:
     return True
 
 def is_archive(file: str) -> bool:
+    match = False
+    for format in ARCHIVE_FORMATS:
+        if file.endswith(format):
+            match = True
+            break
+    if not match:
+        return False
+    
     result = subprocess.run(f'"{SEVENZIP_PATH}" l "{file}" -p""', capture_output=True, text=True, shell=True)
     if result.returncode == 0:
         return True
