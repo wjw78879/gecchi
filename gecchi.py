@@ -31,6 +31,10 @@ def download_mega(url: str, folder: str) -> bool:
     print('Loging into MEGA folder...')
     if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-login")}" {url}'):
         return False
+    
+    print('Remote folder contents:')
+    if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-ls")}" -lh'):
+        return False
 
     print('Downloading files...')
     if not execute(f'"{os.path.join(MEGACMD_FOLDER, "mega-get")}" "*" "{folder}"'):
@@ -220,6 +224,7 @@ class Task:
         
         for file in os.listdir(self.content_folder):
             file_path = os.path.join(self.content_folder, file)
+            print(f'Copying [{file}]...')
             if os.name == 'nt':
                 result = execute(f'xcopy "{file_path}" "{dest_folder}" /E/H/Y')
             else:
@@ -227,6 +232,7 @@ class Task:
             if not result:
                 print(f'Failed copying [{file}].')
                 return False
+        print(f'Done copying to [{dest_folder}].')
             
         self.__update_status(STATUS_DONE)
         return True
