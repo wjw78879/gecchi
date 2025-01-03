@@ -56,7 +56,7 @@ def is_archive(file: str) -> bool:
 
 def extract(file: str, folder: str) -> bool:
     for pswd in PASSWORDS:
-        if execute(f'"{SEVENZIP_PATH}" e "{file}" -p"{pswd}" -o"{folder}" -aou', quiet=True): # Rename for exiting file
+        if execute(f'"{SEVENZIP_PATH}" x "{file}" -p"{pswd}" -o"{folder}" -aou', quiet=True): # Rename for exiting file
             return True
     return False
 
