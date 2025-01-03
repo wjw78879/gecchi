@@ -263,12 +263,12 @@ def task_operations(task: Task) -> bool:
     if text == '1':
         if task.run():
             print('Gecchi success!')
-            task.delete()
-            if input('Clear temp? Enter "y" to confirm delete: ') == 'y':
-                task.delete()
-                print('Task deleted.')
-                return False
+            if input('Do you want to preserve temp files? Enter "y" to preserve: ') == 'y':
+                print('Task preserved.')
+                return True
             else:
+                task.delete()
+                print('Task deleted. Exitting.')
                 return True
         else:
             print(f'Running failed. Status: {task.status}. Please check logs and temp files.')
