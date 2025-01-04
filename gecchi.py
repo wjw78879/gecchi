@@ -36,6 +36,7 @@ class ArchiveInfo:
 class BtInfo:
     exist: bool = False
     completed: bool = False
+    state: str = ''
     size: int = -1
     downloaded_size: int = -1
     progress: float = 0.0
@@ -107,10 +108,11 @@ def check_bt(bt_hash: str) -> BtInfo:
     try:
         data = json.loads(msg)
         ret = BtInfo()
+        hash_lower = bt_hash.lower() # qbittorrent returns hash in lower case
         for torrent in data:
-            if not torrent['hash'].startswith(bt_hash):
+            if not torrent['hash'].startswith(hash_lower):
                 continue
-            return BtInfo(exist=True, completed=torrent['completion_on'] is not None,
+            return BtInfo(exist=True, completed=torrent['completion_on'] is not None, state=torrent['state'],
                           size=torrent['size'], downloaded_size=torrent['completed'], 
                           progress=torrent['progress'], speed=torrent['dlspeed'], 
                           eta=torrent['eta'], time_active=torrent['time_active'])
@@ -145,6 +147,7 @@ def download_bt(magnet_link: str, bt_hash: str, folder: str) -> bool:
             delete_bt(bt_hash)
             return True
     else:
+        print('Starting bt download...')
         if not execute(f'qbt torrent add url "magnet:?xt=urn:btih:{bt_hash}" --folder "{folder}"'):
             print('Failed starting BT download.')
             return False
@@ -159,7 +162,7 @@ def download_bt(magnet_link: str, bt_hash: str, folder: str) -> bool:
             print('Download completed.')
             delete_bt(bt_hash)
             return True
-        print(f'BT downloading {format_bytes(info.downloaded_size)}/{format_bytes(info.size)} ({info.progress * 100:.1f}%) at {format_bytes(info.speed)}/s, eta: {datetime.timedelta(info.eta)}, has been active for {datetime.timedelta(info.time_active)}')
+        print(f'{info.state}|{format_bytes(info.downloaded_size)}/{format_bytes(info.size)}|{info.progress * 100:.1f}%|{format_bytes(info.speed)}/s|ETA {datetime.timedelta(info.eta)}|Active {datetime.timedelta(info.time_active)}')
     
 def get_archive_info(file: str) -> ArchiveInfo:
     ret = ArchiveInfo()
@@ -465,8 +468,8 @@ def task_operations(task: Task) -> bool:
     print('5. Exit')
     print('')
 
-    text = input('Select one option (1 ~ 5): ')
-    if text == '1':
+    text = input('Select one option (1 ~ 5), default 1 (Run/Resume): ')
+    if text == '1' or text == '':
         if task.run():
             print('Gecchi success!')
             if input('Do you want to preserve temp files? Enter "y" to preserve: ') == 'y':
@@ -579,8 +582,8 @@ else:
         print(f'{i + 1}: [{tasks[i].status}] {tasks[i].name}')
         
 while True:
-    text = input(f'Select a task to check (1 ~ {len(tasks)}) or enter "n" for a new task: ')
-    if text == 'n':
+    text = input(f'Select a task to check (1 ~ {len(tasks)}) or enter nothing for a new task: ')
+    if text == '':
         task = new_task()
         break
     else:
