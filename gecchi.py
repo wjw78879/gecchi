@@ -381,30 +381,28 @@ class Task:
                 file_path = os.path.join(self.content_folder, file_name)
                 if os.path.isfile(file_path):
                     info = get_archive_info(file_path)
-                    print(f'Archive: {file_name}, ')
                     if info.is_archive:
                         print(f'Archive {file_name}, media ratio {info.media_ratio * 100:.1f}%')
                         if info.media_ratio < MEDIA_RATIO_THRESHOLD:
                             continue
-                        if info.volumes > 1 and info.volume_index != 0:
-                            to_remove.append(file_path)
                         to_remove.append(file_path)
-                        if info.volumes == 1 or info.volume_index == 0:
-                            if info.password_matched:
-                                if not extract(file_path, self.content_folder, info.password):
-                                    print(f'Failed extracting file [{file_name}].')
-                                    return False
-                                else:
-                                    files_extracted = True
+                        if info.volumes > 1 and info.volume_index != 0:
+                            continue
+                        if info.password_matched:
+                            if not extract(file_path, self.content_folder, info.password):
+                                print(f'Failed extracting file [{file_name}].')
+                                return False
                             else:
-                                while True:
-                                    pswd = input(f'Please enter password for archive [{file_name}], or "skip" to skip extracting: ')
-                                    if pswd == 'skip':
-                                        break
-                                    if extract(file_path, self.content_folder, pswd):
-                                        files_extracted = True
-                                        break
-                                    print('Password incorect, please try again.')
+                                files_extracted = True
+                        else:
+                            while True:
+                                pswd = input(f'Please enter password for archive [{file_name}], or "skip" to skip extracting: ')
+                                if pswd == 'skip':
+                                    break
+                                if extract(file_path, self.content_folder, pswd):
+                                    files_extracted = True
+                                    break
+                                print('Password incorect, please try again.')
             
             for file_path in to_remove:
                 #os.remove(file_path)
