@@ -71,14 +71,14 @@ def execute_and_get_output(cmd: str) -> tuple:
     result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
     return result.returncode == 0, result.stdout, result.stderr
 
-def format_bytes(size):
+def format_bytes(size) -> str:
     power = 2**10
     n = 0
     power_labels = ['', 'K', 'M', 'G', 'T']
     while size > power:
         size /= power
         n += 1
-    return size, power_labels[n]+'B'
+    return f'{size:.1f}{power_labels[n]}B'
 
 def download_mega(url: str, folder: str) -> bool:
     print('Logging out on MEGA...')
