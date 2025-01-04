@@ -46,7 +46,7 @@ class BtInfo:
 
 def read_file(folder: str, name: str, default:str = '') -> str:
     try:
-        file = open(os.path.join(folder, name), "r")
+        file = open(os.path.join(folder, name), "r", encoding='utf-8')
     except:
         return default
     content = file.readline()
@@ -55,7 +55,7 @@ def read_file(folder: str, name: str, default:str = '') -> str:
 
 def write_file(folder: str, name: str, content:str) -> bool:
     try:
-        file = open(os.path.join(folder, name), "w")
+        file = open(os.path.join(folder, name), "w", encoding='utf-8')
     except:
         return False
     file.write(content)
@@ -179,45 +179,47 @@ def get_archive_info(file: str) -> ArchiveInfo:
     for pswd in PASSWORDS:
         result = subprocess.run(f'"{SEVENZIP_PATH}" l "{file}" -p"{pswd}"', capture_output=True, text=True, shell=True)
         if result.returncode != 0:
-            if result.stderr.find('Wrong password?') == -1:
+            if result.stderr.find('Wrong password') != -1:
+                continue
+            if result.stderr.find('Cannot open the file as archive') != -1:
                 ret.is_archive = False
                 return ret
+            
+        ret.is_archive = True
+        ret.password_matched = True
+        ret.password = pswd
+
+        # extract info
+        lines = result.stdout.splitlines()
+        splitters = []
+        for i in range(len(lines)):
+            if lines[i].startswith('Volumes = '):
+                ret.volumes = int(lines[i][10:])
+            elif lines[i].startswith('Volume Index = '):
+                ret.volume_index = int(lines[i][15:])
+            elif lines[i].startswith('----------'):
+                splitters.append(i)
+        
+        total_size = 0
+        media_size = 0
+        if len(splitters) >= 2:
+            for i in range(splitters[0] + 1, splitters[1]):
+                if lines[i][20] == 'D':
+                    continue # Is directory
+
+                size = int(lines[i][25:].split()[0])
+
+                total_size += size
+                for ext in MEDIA_FORMATS:
+                    if lines[i].endswith(ext):
+                        media_size += size
+                        break
+        
+        if total_size == 0:
+            ret.media_ratio = 0
         else:
-            ret.is_archive = True
-            ret.password_matched = True
-            ret.password = pswd
-
-            # extract info
-            lines = result.stdout.splitlines()
-            splitters = []
-            for i in range(len(lines)):
-                if lines[i].startswith('Volumes = '):
-                    ret.volumes = int(lines[i][10:])
-                elif lines[i].startswith('Volume Index = '):
-                    ret.volume_index = int(lines[i][15:])
-                elif lines[i].startswith('----------'):
-                    splitters.append(i)
-            
-            total_size = 0
-            media_size = 0
-            if len(splitters) >= 2:
-                for i in range(splitters[0] + 1, splitters[1]):
-                    if lines[i][20] == 'D':
-                        continue # Is directory
-
-                    size = int(lines[i][25:].split()[0])
-
-                    total_size += size
-                    for ext in MEDIA_FORMATS:
-                        if lines[i].endswith(ext):
-                            media_size += size
-                            break
-            
-            if total_size == 0:
-                ret.media_ratio = 0
-            else:
-                ret.media_ratio = media_size / total_size
-            return ret
+            ret.media_ratio = media_size / total_size
+        return ret
 
     ret.is_archive = True
     ret.password_matched = False
@@ -281,9 +283,7 @@ class Task:
         
         status_file_path = os.path.join(self.folder, STATUS)
         if os.path.exists(status_file_path):
-            status_file = open(status_file_path)
-            self.status = status_file.readline()
-            status_file.close()
+            self.status = read_file(self.folder, STATUS)
         else:
             self.__update_status(STATUS_UNKNOWN)
         
@@ -292,18 +292,14 @@ class Task:
             print('Could not load URL.')
             return False
         
-        url_file = open(url_file_path)
-        self.url = url_file.readline()
-        url_file.close()
+        self.url = read_file(self.folder, URL)
 
         category_file_path = os.path.join(self.folder, CATEGORY)
         if not os.path.exists(category_file_path):
             print('Could not load category.')
             return False
         
-        category_file = open(category_file_path)
-        self.category = category_file.readline()
-        category_file.close()
+        self.category = read_file(self.folder, CATEGORY)
         
         return True
     
@@ -313,24 +309,15 @@ class Task:
 
     def set_url(self, url):
         self.url = url
-        url_file_path = os.path.join(self.folder, URL)
-        url_file = open(url_file_path, 'w')
-        url_file.write(url)
-        url_file.close()
+        write_file(self.folder, URL, url)
 
     def set_category(self, category):
         self.category = category
-        category_file_path = os.path.join(self.folder, CATEGORY)
-        category_file = open(category_file_path, 'w')
-        category_file.write(category)
-        category_file.close()
+        write_file(self.folder, CATEGORY, category)
 
     def __update_status(self, status):
         self.status = status
-        status_file_path = os.path.join(self.folder, STATUS)
-        status_file = open(status_file_path, 'w')
-        status_file.write(status)
-        status_file.close()
+        write_file(self.folder, CATEGORY, status)
 
     def download(self) -> bool:
         if self.status != STATUS_UNKNOWN:
@@ -384,7 +371,7 @@ class Task:
                             print(f'Not extracting [{file_name}], media ratio {info.media_ratio * 100:.1f}%')
                             continue
                         to_remove.append(file_path)
-                        if info.volumes > 1 and info.volume_index != 0:
+                        if info.volume_index > 0:
                             continue
                         if info.password_matched:
                             print(f'Extracting [{file_name}], media ratio {info.media_ratio * 100:.1f}%...')
