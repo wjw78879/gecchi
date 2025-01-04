@@ -162,7 +162,7 @@ def download_bt(magnet_link: str, bt_hash: str, folder: str) -> bool:
             print('Download completed.')
             delete_bt(bt_hash)
             return True
-        print(f'{info.state}|{format_bytes(info.downloaded_size)}/{format_bytes(info.size)}|{info.progress * 100:.1f}%|{format_bytes(info.speed)}/s|ETA {datetime.timedelta(info.eta)}|Active {datetime.timedelta(info.time_active)}')
+        print(f'{info.state}|{format_bytes(info.downloaded_size)}/{format_bytes(info.size)}|{info.progress * 100:.1f}%|{format_bytes(info.speed)}/s|ETA {datetime.timedelta(seconds=info.eta)}|Active {datetime.timedelta(seconds=info.time_active)}')
     
 def get_archive_info(file: str) -> ArchiveInfo:
     ret = ArchiveInfo()
