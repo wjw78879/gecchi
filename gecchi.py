@@ -123,7 +123,6 @@ def check_bt(bt_hash: str) -> BtInfo:
         exit(-1)
 
 def delete_bt(bt_hash: str) -> bool:
-    return True # Not deleting for now
     return execute(f'qbt torrent delete {bt_hash}')
 
 def download_bt_magnet_link(magnet_link: str, folder: str) -> bool:
@@ -149,7 +148,7 @@ def download_bt(magnet_link: str, bt_hash: str, folder: str) -> bool:
             return True
     else:
         print('Starting bt download...')
-        if not execute(f'qbt torrent add url "magnet:?xt=urn:btih:{bt_hash}" --folder "{folder}"'):
+        if not execute(f'qbt torrent add url "{magnet_link}" --folder "{folder}"'):
             print('Failed starting BT download.')
             return False
     
@@ -226,7 +225,7 @@ def get_archive_info(file: str) -> ArchiveInfo:
     return ret
 
 def extract(file: str, folder: str, password: str) -> bool:
-    return execute(f'"{SEVENZIP_PATH}" x "{file}" -p"{password}" -o"{folder}" -aou') # Rename for exiting file
+    return execute(f'"{SEVENZIP_PATH}" x "{file}" -p"{password}" -o"{folder}" -aou', quiet=True) # Rename for exiting file
 
 def prompt_for_category() -> str:
     categories = []
@@ -382,13 +381,14 @@ class Task:
                 if os.path.isfile(file_path):
                     info = get_archive_info(file_path)
                     if info.is_archive:
-                        print(f'Archive {file_name}, media ratio {info.media_ratio * 100:.1f}%')
                         if info.media_ratio < MEDIA_RATIO_THRESHOLD:
+                            print(f'Not extracting [{file_name}], media ratio {info.media_ratio * 100:.1f}%')
                             continue
                         to_remove.append(file_path)
                         if info.volumes > 1 and info.volume_index != 0:
                             continue
                         if info.password_matched:
+                            print(f'Extracting [{file_name}], media ratio {info.media_ratio * 100:.1f}%...')
                             if not extract(file_path, self.content_folder, info.password):
                                 print(f'Failed extracting file [{file_name}].')
                                 return False
@@ -432,9 +432,9 @@ class Task:
             file_path = os.path.join(self.content_folder, file)
             print(f'Copying [{file}]...')
             if os.name == 'nt':
-                result = execute(f'xcopy "{file_path}" "{dest_folder}" /E/H/Y')
+                result = execute(f'xcopy "{file_path}" "{dest_folder}" /E/H/Y', quiet=True)
             else:
-                result = execute(f'cp -r "{file_path}" "{dest_folder}"')
+                result = execute(f'cp -r "{file_path}" "{dest_folder}"', quiet=True)
             if not result:
                 print(f'Failed copying [{file}].')
                 return False
