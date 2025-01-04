@@ -427,9 +427,10 @@ class Task:
             print(f'Name already exists as a file: {dest_folder}')
             return False
         
+        print('Copying files to NAS...')
         for file in os.listdir(self.content_folder):
             file_path = os.path.join(self.content_folder, file)
-            print(f'Copying [{file}]...')
+            #print(f'Copying [{file}]...')
             if os.name == 'nt':
                 result = execute(f'xcopy "{file_path}" "{dest_folder}" /E/H/Y', quiet=True)
             else:
@@ -437,7 +438,7 @@ class Task:
             if not result:
                 print(f'Failed copying [{file}].')
                 return False
-        print(f'Done copying to [{dest_folder}].')
+        print(f'Finished copying files.')
             
         self.__update_status(STATUS_DONE)
         return True
