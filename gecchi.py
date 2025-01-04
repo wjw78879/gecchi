@@ -179,7 +179,6 @@ def get_archive_info(file: str) -> ArchiveInfo:
     for pswd in PASSWORDS:
         result = subprocess.run(f'"{SEVENZIP_PATH}" l "{file}" -p"{pswd}"', capture_output=True, text=True, shell=True)
         if result.returncode != 0:
-            print(result.stderr)
             if result.stderr.find('Wrong password?') == -1:
                 ret.is_archive = False
                 return ret
