@@ -370,7 +370,7 @@ class Task:
                     shutil.move(single_folder_path, p) # rename folder, to avoid the inner files have same name
                     for f in os.listdir(p):
                         shutil.move(os.path.join(p, f), self.content_folder)
-                    os.remove(p)
+                    shutil.rmtree(p)
                     continue # Go to next iteration
 
             files_extracted = False
