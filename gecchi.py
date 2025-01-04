@@ -123,6 +123,7 @@ def check_bt(bt_hash: str) -> BtInfo:
         exit(-1)
 
 def delete_bt(bt_hash: str) -> bool:
+    return True # Not deleting for now
     return execute(f'qbt torrent delete {bt_hash}')
 
 def download_bt_magnet_link(magnet_link: str, folder: str) -> bool:
@@ -380,7 +381,11 @@ class Task:
                 file_path = os.path.join(self.content_folder, file_name)
                 if os.path.isfile(file_path):
                     info = get_archive_info(file_path)
-                    if info.is_archive and info.media_ratio > MEDIA_RATIO_THRESHOLD:
+                    print(f'Archive: {file_name}, ')
+                    if info.is_archive:
+                        print(f'Archive {file_name}, media ratio {info.media_ratio * 100:.1f}%')
+                        if info.media_ratio < MEDIA_RATIO_THRESHOLD:
+                            continue
                         if info.volumes > 1 and info.volume_index != 0:
                             to_remove.append(file_path)
                         to_remove.append(file_path)
