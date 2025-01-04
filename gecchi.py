@@ -2,10 +2,15 @@ import os
 import shutil
 import subprocess
 import sys
+import json
+import time
+import datetime
+from dataclasses import dataclass
 
 STATUS = 'STATUS'
 URL = 'URL'
 CATEGORY = 'CATEGORY'
+
 STATUS_UNKNOWN = 'Not Started'
 STATUS_DOWNLOADED = 'Downloaded'
 STATUS_EXTRACTED = 'Extracted'
@@ -14,14 +19,65 @@ STATUS_DONE = 'Done'
 CONTENT_FOLDER = 'content'
 
 PASSWORDS = ['⑨']
-ARCHIVE_FORMATS = ['.jpg', '.7z', '.zip', '.rar']
+#ARCHIVE_FORMATS = ['.jpg', '.7z', '.zip', '.rar']
+MEDIA_FORMATS = ['.jpg', '.jpeg', '.png', '.mp4', '.mkv', '.mp3', '.wav', '.apk', '.zip', '.7z', '.rar']
+MEDIA_RATIO_THRESHOLD = 0.5
+
+@dataclass
+class ArchiveInfo:
+    is_archive: bool = False
+    password_matched: bool = False
+    password: str = ''
+    volumes: int = -1
+    volume_index: int = -1
+    media_ratio: float = 0.0
+
+@dataclass
+class BtInfo:
+    exist: bool = False
+    completed: bool = False
+    size: int = -1
+    downloaded_size: int = -1
+    progress: float = 0.0
+    speed: int = -1
+    eta: int = -1
+    time_active: int = -1
+
+def read_file(folder: str, name: str, default:str = '') -> str:
+    try:
+        file = open(os.path.join(folder, name), "r")
+    except:
+        return default
+    content = file.readline()
+    file.close()
+    return content
+
+def write_file(folder: str, name: str, content:str) -> bool:
+    try:
+        file = open(os.path.join(folder, name), "w")
+    except:
+        return False
+    file.write(content)
+    file.close()
+    return True
 
 def execute(cmd: str, quiet=False) -> bool:
-    result = subprocess.run(cmd, capture_output=not quiet, text=True, shell=True)
-    if not quiet:
-        print(result.stdout)
-        print(result.stderr)
+    result = subprocess.run(cmd, capture_output=quiet, shell=True)
     return result.returncode == 0
+
+# Returns: (success: bool, stdout: str, stderr:str)
+def execute_and_get_output(cmd: str) -> tuple:
+    result = subprocess.run(cmd, capture_output=True, text=True, shell=True)
+    return result.returncode == 0, result.stdout, result.stderr
+
+def format_bytes(size):
+    power = 2**10
+    n = 0
+    power_labels = ['', 'K', 'M', 'G', 'T']
+    while size > power:
+        size /= power
+        n += 1
+    return size, power_labels[n]+'B'
 
 def download_mega(url: str, folder: str) -> bool:
     print('Logging out on MEGA...')
@@ -43,26 +99,130 @@ def download_mega(url: str, folder: str) -> bool:
     print('Archive downloaded.')
     return True
 
-def is_archive(file: str) -> bool:
-    match = False
-    for format in ARCHIVE_FORMATS:
-        if file.endswith(format):
-            match = True
-            break
-    if not match:
-        return False
-    
-    result = subprocess.run(f'"{SEVENZIP_PATH}" l "{file}" -p""', capture_output=True, text=True, shell=True)
-    if result.returncode == 0:
-        return True
-    elif result.stderr.find('Wrong password?') != -1:
-        return True
+def check_bt(bt_hash: str) -> BtInfo:
+    success, msg, err = execute_and_get_output(f'qbt torrent list --format=json')
+    if not success:
+        print('Failed getting qbittorrent cli to work!')
+        exit(-1)
+    try:
+        data = json.loads(msg)
+        ret = BtInfo()
+        for torrent in data:
+            if not torrent['hash'].startswith(bt_hash):
+                continue
+            return BtInfo(exist=True, completed=torrent['completion_on'] is not None,
+                          size=torrent['size'], downloaded_size=torrent['completed'], 
+                          progress=torrent['progress'], speed=torrent['dlspeed'], 
+                          eta=torrent['eta'], time_active=torrent['time_active'])
+        return BtInfo(exist=False)
 
-def extract(file: str, folder: str) -> bool:
-    for pswd in PASSWORDS:
-        if execute(f'"{SEVENZIP_PATH}" x "{file}" -p"{pswd}" -o"{folder}" -aou', quiet=True): # Rename for exiting file
+    except:
+        print('Qbittorrent output invalid!')
+        exit(-1)
+
+def delete_bt(bt_hash: str) -> bool:
+    return execute(f'qbt torrent delete {bt_hash}')
+
+def download_bt_magnet_link(magnet_link: str, folder: str) -> bool:
+    # prefix: 20 cahrs, hash: 40 chars
+    if not magnet_link.startswith('magnet:?xt=urn:btih:') or not len(magnet_link) >= 60:
+        print('Invalid magnet link!')
+        return False
+    return download_bt(magnet_link, magnet_link[20:60], folder)
+
+def download_bt_hash(bt_hash: str, folder: str) -> bool:
+    if len(bt_hash) != 40:
+        print('Invalid bt hash!')
+        return False
+    return download_bt('magnet:?xt=urn:btih:' + bt_hash, bt_hash, folder)
+
+def download_bt(magnet_link: str, bt_hash: str, folder: str) -> bool:
+    # Check bt state first
+    info = check_bt(bt_hash)
+    if info.exist:
+        if info.completed:
+            print('File download already completed.')
+            delete_bt(bt_hash)
             return True
-    return False
+    else:
+        if not execute(f'qbt torrent add url "magnet:?xt=urn:btih:{bt_hash}" --folder "{folder}"'):
+            print('Failed starting BT download.')
+            return False
+    
+    while True:
+        time.sleep(1.0)
+        info = check_bt(bt_hash)
+        if not info.exist:
+            print('BT download disappeared. Please restart the task.')
+            return False
+        if info.completed:
+            print('Download completed.')
+            delete_bt(bt_hash)
+            return True
+        print(f'BT downloading {format_bytes(info.downloaded_size)}/{format_bytes(info.size)} ({info.progress * 100:.1f}%) at {format_bytes(info.speed)}/s, eta: {datetime.timedelta(info.eta)}, has been active for {datetime.timedelta(info.time_active)}')
+    
+def get_archive_info(file: str) -> ArchiveInfo:
+    ret = ArchiveInfo()
+    # For now, allow any file extension
+    # match = False
+    # for format in ARCHIVE_FORMATS:
+    #     if file.endswith(format):
+    #         match = True
+    #         break
+    # if not match:
+    #     ret.is_archive = False
+    #     return ret
+    
+    for pswd in PASSWORDS:
+        result = subprocess.run(f'"{SEVENZIP_PATH}" l "{file}" -p"{pswd}"', capture_output=True, text=True, shell=True)
+        if result.returncode != 0:
+            print(result.stderr)
+            if result.stderr.find('Wrong password?') == -1:
+                ret.is_archive = False
+                return ret
+        else:
+            ret.is_archive = True
+            ret.password_matched = True
+            ret.password = pswd
+
+            # extract info
+            lines = result.stdout.splitlines()
+            splitters = []
+            for i in range(len(lines)):
+                if lines[i].startswith('Volumes = '):
+                    ret.volumes = int(lines[i][10:])
+                elif lines[i].startswith('Volume Index = '):
+                    ret.volume_index = int(lines[i][15:])
+                elif lines[i].startswith('----------'):
+                    splitters.append(i)
+            
+            total_size = 0
+            media_size = 0
+            if len(splitters) >= 2:
+                for i in range(splitters[0] + 1, splitters[1]):
+                    if lines[i][20] == 'D':
+                        continue # Is directory
+
+                    size = int(lines[i][25:].split()[0])
+
+                    total_size += size
+                    for ext in MEDIA_FORMATS:
+                        if lines[i].endswith(ext):
+                            media_size += size
+                            break
+            
+            if total_size == 0:
+                ret.media_ratio = 0
+            else:
+                ret.media_ratio = media_size / total_size
+            return ret
+
+    ret.is_archive = True
+    ret.password_matched = False
+    return ret
+
+def extract(file: str, folder: str, password: str) -> bool:
+    return execute(f'"{SEVENZIP_PATH}" x "{file}" -p"{password}" -o"{folder}" -aou') # Rename for exiting file
 
 def prompt_for_category() -> str:
     categories = []
@@ -177,13 +337,20 @@ class Task:
         
         # Determine type of link
         if self.url.startswith('https://mega.nz'):
-            if download_mega(self.url, self.content_folder):
-                self.__update_status(STATUS_DOWNLOADED)
-                return True
-            return False
+            if not download_mega(self.url, self.content_folder):
+                return False
+        elif self.url.startswith('magnet:'):
+            if not download_bt_magnet_link(self.url, self.content_folder):
+                return False
+        elif len(self.url) == 40:
+            if not download_bt_hash(self.url, self.content_folder):
+                return False
         else:
             print(f'Unknown URL: {self.url}')
             return False
+        
+        self.__update_status(STATUS_DOWNLOADED)
+        return True
         
     def extract(self) -> bool:
         if self.status != STATUS_DOWNLOADED:
@@ -191,17 +358,50 @@ class Task:
             return False
         
         while True:
-            has_archive = False
-            for file_name in os.listdir(self.content_folder):
+            files = os.listdir(self.content_folder)
+
+            # Handle single folder case
+            if len(files) == 1:
+                single_folder_path = os.path.join(self.content_folder, files[0])
+                if os.path.isdir(single_folder_path):
+                    p = os.path.join(self.content_folder, '_SINGLE_FOLDER_')
+                    shutil.move(single_folder_path, p) # rename folder, to avoid the inner files have same name
+                    for f in os.listdir(p):
+                        shutil.move(os.path.join(p, f), self.content_folder)
+                    os.remove(p)
+                    continue # Go to next iteration
+
+            files_extracted = False
+            to_remove = []
+            for file_name in files:
                 file_path = os.path.join(self.content_folder, file_name)
-                if os.path.isfile(file_path) and is_archive(file_path):
-                    has_archive = True
-                    if not extract(file_path, self.content_folder):
-                        print(f'Failed extracting file [{file_name}]. Maybe password incorrect?')
-                        return False
-                    #os.remove(file_path) # Remove after successfull extraction
-                    shutil.move(file_path, self.folder) # Move to outer side
-            if not has_archive:
+                if os.path.isfile(file_path):
+                    info = get_archive_info(file_path)
+                    if info.is_archive and info.media_ratio > MEDIA_RATIO_THRESHOLD:
+                        if info.volumes > 1 and info.volume_index != 0:
+                            to_remove.append(file_path)
+                        to_remove.append(file_path)
+                        if info.volumes == 1 or info.volume_index == 0:
+                            if info.password_matched:
+                                if not extract(file_path, self.content_folder, info.password):
+                                    print(f'Failed extracting file [{file_name}].')
+                                    return False
+                                else:
+                                    files_extracted = True
+                            else:
+                                while True:
+                                    pswd = input(f'Please enter password for archive [{file_name}], or "skip" to skip extracting: ')
+                                    if pswd == 'skip':
+                                        break
+                                    if extract(file_path, self.content_folder, pswd):
+                                        files_extracted = True
+                                        break
+                                    print('Password incorect, please try again.')
+            
+            for file_path in to_remove:
+                #os.remove(file_path)
+                shutil.move(file_path, self.folder) # Move to outer side rather than deleting
+            if not files_extracted:
                 self.__update_status(STATUS_EXTRACTED)
                 return True
             
@@ -302,6 +502,39 @@ def task_operations(task: Task) -> bool:
         print('Unknown choice.')
         return True
 
+def get_current_tasks() -> list:
+    tasks = []
+    for file in os.listdir(WORKSPACE):
+        if os.path.isdir(os.path.join(WORKSPACE, file)):
+            task = Task()
+            if task.initialize_load(WORKSPACE, file):
+                tasks.append(task)
+            else:
+                shutil.rmtree(os.path.join(WORKSPACE, file))
+    return tasks
+
+def new_task() -> Task:
+    task = Task()
+    while True:
+        name = input('Enter new ecchi name: ')
+        if os.path.exists(os.path.join(WORKSPACE, name)):
+            print('Task with this name already exists.')
+            continue
+        try:
+            os.mkdir(os.path.join(WORKSPACE, name))
+        except:
+            print('Name invalid for file. Please note that special characters like :/\\|*?"<> are not allowed.')
+            continue
+
+        break
+
+    task.initialize_new(WORKSPACE, name, input('Enter ecchi URL: '), prompt_for_category()) # Assuming not failing
+    return task
+
+# SEVENZIP_PATH = '7z'
+# print(get_archive_info('C:\\Users\\wjw11\\Downloads\\gecchi_ws\\兄.7z'))
+# exit(0)
+
 # Check args
 if len(sys.argv) < 3:
     print('Usage: gecchi.py [workspace] [dest_folder_root]')
@@ -318,7 +551,11 @@ if not os.path.isdir(DEST_FOLDER_ROOT):
 
 # Check environment
 print('NOTE: You can set 7z and mega path by setting SEVENZIP_PATH and MEGACMD_FOLDER environment variables.')
-SEVENZIP_PATH = '7zz'
+if os.name == 'nt':
+    SEVENZIP_PATH = '7z.exe'
+else:
+    SEVENZIP_PATH = '7zz'
+
 MEGACMD_FOLDER = ''
 
 env_7z_path = os.environ.get('SEVENZIP_PATH', '')
@@ -332,42 +569,20 @@ if env_mega_path != '':
     print(f'Using megacmd folder path from env: {env_mega_path}')
 
 # Print tasks first
-tasks = []
-for file in os.listdir(WORKSPACE):
-    if os.path.isdir(os.path.join(WORKSPACE, file)):
-        task = Task()
-        if task.initialize_load(WORKSPACE, file):
-            tasks.append(task)
-        else:
-            shutil.rmtree(os.path.join(WORKSPACE, file))
+tasks = get_current_tasks()
 
-print('Current gecchi tasks:')
 if len(tasks) == 0:
-    print('No task found.')
+    print('No existing task found.')
 else:
+    print('Current gecchi tasks:')
     for i in range(len(tasks)):
         print(f'{i + 1}: [{tasks[i].status}] {tasks[i].name}')
         
 while True:
     text = input(f'Select a task to check (1 ~ {len(tasks)}) or enter "n" for a new task: ')
     if text == 'n':
-        task = Task()
-        while True:
-            name = input('Enter new ecchi name: ')
-            if os.path.exists(os.path.join(WORKSPACE, name)):
-                print('Task with this name already exists.')
-                continue
-            try:
-                os.mkdir(os.path.join(WORKSPACE, name))
-            except:
-                print('Name invalid for file. Please note that special characters like :/\\|*?"<> are not allowed.')
-                continue
-
-            break
-
-        task.initialize_new(WORKSPACE, name, input('Enter ecchi URL: '), prompt_for_category()) # Assuming not failing
+        task = new_task()
         break
-        
     else:
         try:
             val = int(text)
@@ -380,7 +595,6 @@ while True:
             else:
                 print('Index out of range.')
                 continue
-        
         break
         
 while (task_operations(task)):
