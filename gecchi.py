@@ -474,7 +474,7 @@ def task_operations(task: Task) -> bool:
     if text == '1' or text == '':
         if task.run():
             print('Gecchi success!')
-            if input('Do you want to preserve temp files? Enter "y" to preserve: ') == 'y':
+            if input('Do you want to retain temp files? Enter "y" to retain (default not retaining): ') == 'y':
                 print('Task preserved.')
                 return True
             else:
