@@ -282,23 +282,20 @@ class Task:
             os.mkdir(self.content_folder)
         
         status_file_path = os.path.join(self.folder, STATUS)
-        if os.path.exists(status_file_path):
-            self.status = read_file(self.folder, STATUS)
-        else:
-            self.__update_status(STATUS_UNKNOWN)
+        if not os.path.exists(status_file_path):
+            print('Could not load status.')
+        self.status = read_file(self.folder, STATUS)
         
         url_file_path = os.path.join(self.folder, URL)
         if not os.path.exists(url_file_path):
             print('Could not load URL.')
             return False
-        
         self.url = read_file(self.folder, URL)
 
         category_file_path = os.path.join(self.folder, CATEGORY)
         if not os.path.exists(category_file_path):
             print('Could not load category.')
             return False
-        
         self.category = read_file(self.folder, CATEGORY)
         
         return True
