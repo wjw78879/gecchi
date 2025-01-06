@@ -264,7 +264,7 @@ class Task:
         if not os.path.exists(self.content_folder):
             os.mkdir(self.content_folder)
 
-        self.__update_status(STATUS_UNKNOWN)
+        self.set_status(STATUS_UNKNOWN)
         self.set_url(url)
         self.set_category(category)
         return True
@@ -304,6 +304,10 @@ class Task:
         if os.path.exists(self.folder):
             shutil.rmtree(self.folder)
 
+    def set_status(self, status):
+        self.status = status
+        write_file(self.folder, STATUS, status)
+
     def set_url(self, url):
         self.url = url
         write_file(self.folder, URL, url)
@@ -311,10 +315,6 @@ class Task:
     def set_category(self, category):
         self.category = category
         write_file(self.folder, CATEGORY, category)
-
-    def __update_status(self, status):
-        self.status = status
-        write_file(self.folder, STATUS, status)
 
     def download(self) -> bool:
         if self.status != STATUS_UNKNOWN:
@@ -335,7 +335,7 @@ class Task:
             print(f'Unknown URL: {self.url}')
             return False
         
-        self.__update_status(STATUS_DOWNLOADED)
+        self.set_status(STATUS_DOWNLOADED)
         return True
         
     def extract(self) -> bool:
@@ -391,7 +391,7 @@ class Task:
                 #os.remove(file_path)
                 shutil.move(file_path, self.folder) # Move to outer side rather than deleting
             if not files_extracted:
-                self.__update_status(STATUS_EXTRACTED)
+                self.set_status(STATUS_EXTRACTED)
                 return True
             
     def copy(self):
@@ -424,7 +424,7 @@ class Task:
                 return False
         print(f'Finished copying files.')
             
-        self.__update_status(STATUS_DONE)
+        self.set_status(STATUS_DONE)
         return True
     
     def run(self) -> bool:
@@ -432,6 +432,18 @@ class Task:
             return self.download() and self.extract() and self.copy()
         elif self.status == STATUS_DOWNLOADED:
             return self.extract() and self.copy()
+        elif self.status == STATUS_EXTRACTED:
+            return self.copy()
+        elif self.status == STATUS_DONE:
+            return True
+        else:
+            return False
+        
+    def run_one_stage(self) -> bool:
+        if self.status == STATUS_UNKNOWN:
+            return self.download()
+        elif self.status == STATUS_DOWNLOADED:
+            return self.extract()
         elif self.status == STATUS_EXTRACTED:
             return self.copy()
         elif self.status == STATUS_DONE:
@@ -449,13 +461,24 @@ def task_operations(task: Task) -> bool:
     print('')
     print('Options: ')
     print('1. Run/Resume')
-    print('2. Set URL')
-    print('3. Set category')
-    print('4. Delete')
-    print('5. Exit')
+    if task.status == STATUS_UNKNOWN:
+        print('2. Run next stage: Download')
+    elif task.status == STATUS_DOWNLOADED:
+        print('2. Run next stage: Extract')
+    elif task.status == STATUS_EXTRACTED:
+        print('2. Run next stage: Copy')
+    elif task.status == STATUS_DONE:
+        print('2. Run next stage: None')
+    else:
+        print('2. Run next stage: ???')
+    print('3. Set URL')
+    print('4. Set category')
+    print('5. Set status')
+    print('6. Delete')
+    print('7. Exit')
     print('')
 
-    text = input('Select one option (1 ~ 5), default 1 (Run/Resume): ')
+    text = input('Select one option (1 ~ 6), default 1 (Run/Resume): ')
     if text == '1' or text == '':
         if task.run():
             print('Gecchi success!')
@@ -470,14 +493,46 @@ def task_operations(task: Task) -> bool:
             print(f'Running failed. Status: {task.status}. Please check logs and temp files.')
             return True
     elif text == '2':
+        if task.run_one_stage():
+            print('Gecchi one stage success.')
+        else:
+            print('Gecchi one stage failed. Please check logs and temp files.')
+        return True
+    elif text == '3':
         task.set_url(input('Enter new URL: '))
         print('URL set.')
         return True
-    elif text == '3':
+    elif text == '4':
         task.set_category(prompt_for_category())
         print('Category set.')
         return True
-    elif text == '4':
+    elif text == '5':
+        print('Choose which target status:')
+        print(f'1. {STATUS_UNKNOWN}')
+        print(f'2. {STATUS_DOWNLOADED}')
+        print(f'3. {STATUS_EXTRACTED}')
+        print(f'4. {STATUS_DONE}')
+        t = input('Enter option (1 ~ 4), or other to cancel: ')
+        if t == '1':
+            task.set_status(STATUS_UNKNOWN)
+            print(f'Set status to: {STATUS_UNKNOWN}.')
+            return True
+        elif t == '2':
+            task.set_status(STATUS_DOWNLOADED)
+            print(f'Set status to: {STATUS_DOWNLOADED}.')
+            return True
+        elif t == '3':
+            task.set_status(STATUS_EXTRACTED)
+            print(f'Set status to: {STATUS_EXTRACTED}.')
+            return True
+        elif t == '4':
+            task.set_status(STATUS_DONE)
+            print(f'Set status to: {STATUS_DONE}.')
+            return True
+        else:
+            print('Cancel setting status.')
+            return True
+    elif text == '6':
         if input('Enter "y" to confirm delete: ') == 'y':
             task.delete()
             print('Task deleted.')
@@ -485,7 +540,7 @@ def task_operations(task: Task) -> bool:
         else:
             print('Cancel delete.')
             return True
-    elif text == '5':
+    elif text == '7':
         print('Exitting.')
         return False
     else:
