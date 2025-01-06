@@ -317,7 +317,7 @@ class Task:
 
     def __update_status(self, status):
         self.status = status
-        write_file(self.folder, CATEGORY, status)
+        write_file(self.folder, STATUS, status)
 
     def download(self) -> bool:
         if self.status != STATUS_UNKNOWN:
@@ -503,7 +503,8 @@ def get_current_tasks() -> list:
             if task.initialize_load(WORKSPACE, file):
                 tasks.append(task)
             else:
-                shutil.rmtree(os.path.join(WORKSPACE, file))
+                print(f'Failed loading task folder: {file}')
+                #shutil.rmtree(os.path.join(WORKSPACE, file))
     return tasks
 
 def new_task() -> Task:
