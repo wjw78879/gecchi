@@ -284,6 +284,7 @@ class Task:
         status_file_path = os.path.join(self.folder, STATUS)
         if not os.path.exists(status_file_path):
             print('Could not load status.')
+            return False
         self.status = read_file(self.folder, STATUS)
         
         url_file_path = os.path.join(self.folder, URL)
@@ -507,7 +508,7 @@ def task_operations(task: Task) -> bool:
         print('Category set.')
         return True
     elif text == '5':
-        print('Choose which target status:')
+        print('Choose target status:')
         print(f'1. {STATUS_UNKNOWN}')
         print(f'2. {STATUS_DOWNLOADED}')
         print(f'3. {STATUS_EXTRACTED}')
