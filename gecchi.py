@@ -155,17 +155,18 @@ def download_bt(magnet_link: str, bt_hash: str, folder: str) -> bool:
             print('Failed starting BT download.')
             return False
     
+    print('NOTE: BT download will run in background. You can close gecchi now and check progress later.')
     while True:
         time.sleep(1.0)
         info = check_bt(bt_hash)
         if not info.exist:
-            print('BT download disappeared. Please restart the task.')
+            print('\nBT download disappeared. Please restart the task.')
             return False
         if info.completed:
-            print('Download completed.')
+            print('\nDownload completed.')
             delete_bt(bt_hash)
             return True
-        print(f'{info.state}|{format_bytes(info.downloaded_size)}/{format_bytes(info.size)}|{info.progress * 100:.1f}%|{format_bytes(info.speed)}/s|ETA {datetime.timedelta(seconds=info.eta)}|Active {datetime.timedelta(seconds=info.time_active)}')
+        print(f'{info.state}|{format_bytes(info.downloaded_size)}/{format_bytes(info.size)}|{info.progress * 100:.1f}%|{format_bytes(info.speed)}/s|ETA {datetime.timedelta(seconds=info.eta)}|Active {datetime.timedelta(seconds=info.time_active)}\r', end='')
 
 def download_baidu(url: str, name: str, folder: str) -> bool:
     print('Making remote dir...')
