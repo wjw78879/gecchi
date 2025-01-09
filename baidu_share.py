@@ -275,7 +275,8 @@ class BaiDuPan(object):
 		'''
 		构造转存的URL，除了logid不知道有什么用，但是经过验证，固定值没问题，其他变化的值均可在验证通过的页面获取到
 		'''
-		save_url = 'https://pan.baidu.com/share/transfer?shareid=%s&from=%s&ondup=newcopy&async=1&channel=chunlei&web=1&app_id=250528&bdstoken=%s\
+		# &ondup=newcopy
+		save_url = 'https://pan.baidu.com/share/transfer?shareid=%s&from=%s&async=1&channel=chunlei&web=1&app_id=250528&bdstoken=%s\
 					&logid=MTU3MjM1NjQzMzgyMTAuMjUwNzU2MTY4MTc0NzQ0MQ==&clienttype=0' % (shareid, _from, bdstoken)
 		file_list = share_data['file_list']
 		form_data = {
@@ -293,7 +294,10 @@ class BaiDuPan(object):
 		'''
 		save_res = self.session.post(save_url, headers=headers, data=form_data)
 		save_json = save_res.json()
-		errno, err_msg, extra, info = (0, '转存成功', save_json['extra'], save_json['info']) if(save_json['errno'] == 0) else (9, '转存失败：%d' % save_json['errno'], '', '')
+		if save_json['errno'] == 4: # File already exist
+			return {'errno': 0, 'err_msg': 'File already exist', "extra": '', "info": ''}
+
+		errno, err_msg, extra, info = (0, f'转存成功: {save_json["show_msg"]}', save_json['extra'], save_json['info']) if(save_json['errno'] == 0) else (9, f'转存失败({save_json["errno"]})： {save_json["show_msg"]}', '', '')
 		return {'errno': errno, 'err_msg': err_msg, "extra": extra, "info": info}
 
 

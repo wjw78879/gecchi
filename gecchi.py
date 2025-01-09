@@ -5,6 +5,7 @@ import sys
 import json
 import time
 import datetime
+import readline
 from baidu_share import BaiDuPan
 from dataclasses import dataclass
 
@@ -18,7 +19,9 @@ STATUS_EXTRACTED = 'Extracted'
 STATUS_DONE = 'Done'
 
 CONTENT_FOLDER = 'content'
+TEMP_FOLDER = 'temp'
 
+CATEGORIES = {}
 PASSWORDS = ['⑨', '米粒儿']
 #ARCHIVE_FORMATS = ['.jpg', '.7z', '.zip', '.rar']
 MEDIA_FORMATS = ['.jpg', '.jpeg', '.png', '.mp4', '.mkv', '.mp3', '.wav', '.apk', '.zip', '.7z', '.rar']
@@ -231,7 +234,7 @@ def get_archive_info(file: str) -> ArchiveInfo:
                 ret.password = pswd
                 PASSWORDS.append(pswd) # Add to global password list if success
                 break
-            print('Password incorect, please try again.')
+            print('Password incorrect, please try again.')
 
     # extract info
     lines = result.stdout.splitlines()
@@ -266,14 +269,85 @@ def get_archive_info(file: str) -> ArchiveInfo:
         ret.media_ratio = media_size / total_size
     return ret
 
-def extract(file: str, folder: str, password: str) -> bool:
-    return execute(f'"{SEVENZIP_PATH}" x "{file}" -p"{password}" -o"{folder}" -aou', quiet=True) # Rename for exiting file
+def move_all_files(src_folder: str, dest_folder: str):
+    for file in os.listdir(src_folder):
+        file_path = os.path.join(src_folder, file)
+        try:
+            shutil.move(file_path, dest_folder)
+        except:
+            dot_pos = file.rfind('.')
+            if dot_pos == -1:
+                name = file
+                ext = ''
+            else:
+                name = file[:dot_pos]
+                ext = file[dot_pos:]
+            number = 1
+            while True:
+                new_name = f'{name}_{number}{ext}'
+                new_path = os.path.join(dest_folder, new_name)
+                if not os.path.exists(new_path):
+                    print(f'File already exists, renaming to [{new_name}].')
+                    shutil.move(file_path, new_path)
+                    break
+                number += 1
+
+def remove_all_files(folder: str):
+    if len(os.listdir(folder)) == 0:
+        return
+    shutil.rmtree(folder)
+    os.mkdir(folder)
+
+# Returns: (success, extracted)
+def extract(file: str, folder: str, password: str, temp_folder: str) -> tuple:
+    # The -aou option enables renaming for exiting file
+    # Update: Not using -aou, assuming the temp folder is empty.
+    success, stdout, stderr = execute_and_get_output(f'"{SEVENZIP_PATH}" x "{file}" -p"{password}" -o"{temp_folder}"')
+    if success:
+        move_all_files(temp_folder, folder)
+        return True, True
+    
+    remove_all_files(temp_folder)
+    if stderr.find('Wrong password') != -1:
+        # This is the case when some format (like 7z) needs password on extraction but not listing.
+        # We try the password list first, then prompt for a password.
+        for pswd in PASSWORDS:
+            success, stdout, stderr = execute_and_get_output(f'"{SEVENZIP_PATH}" x "{file}" -p"{pswd}" -o"{temp_folder}"')
+            if success:
+                move_all_files(temp_folder, folder)
+                return True, True
+            remove_all_files(temp_folder)
+            if stderr.find('Wrong password') == -1:
+                print('Extraction error:')
+                print(stdout)
+                print(stderr)
+                return False, False
+                
+        while True:
+            pswd = input(f'Please enter password for archive [{file}], or "skip" to skip extracting: ')
+            if pswd == 'skip':
+                print('Skipping extraction.')
+                return True, False
+            print('Extracting...')
+            success, stdout, stderr = execute_and_get_output(f'"{SEVENZIP_PATH}" x "{file}" -p"{pswd}" -o"{temp_folder}"')
+            if success:
+                print('Password correct, extraction success.')
+                PASSWORDS.append(pswd) # Add to global password list if success
+                move_all_files(temp_folder, folder)
+                return True, True
+            remove_all_files(temp_folder)
+            if stderr.find('Wrong password') != -1:
+                break # Error
+
+            print('Password incorrect, please try again.')
+
+    print('Extraction error:')
+    print(stdout)
+    print(stderr)
+    return False, False
 
 def prompt_for_category() -> str:
-    categories = []
-    for file in os.listdir(DEST_FOLDER_ROOT):
-        if os.path.isdir(os.path.join(DEST_FOLDER_ROOT, file)):
-            categories.append(file)
+    categories = list(CATEGORIES.keys())
     
     print('Please choose category from below:')
     for i in range(len(categories)):
@@ -296,6 +370,7 @@ class Task:
     def initialize_new(self, ws, name, url, category) -> bool:
         self.folder = os.path.join(ws, name)
         self.content_folder = os.path.join(ws, name, CONTENT_FOLDER)
+        self.temp_folder = os.path.join(ws, name, TEMP_FOLDER)
         self.name = name
 
         if not os.path.exists(self.folder):
@@ -304,6 +379,9 @@ class Task:
         
         if not os.path.exists(self.content_folder):
             os.mkdir(self.content_folder)
+
+        if not os.path.exists(self.temp_folder):
+            os.mkdir(self.temp_folder)
 
         self.set_status(STATUS_UNKNOWN)
         self.set_url(url)
@@ -313,6 +391,7 @@ class Task:
     def initialize_load(self, ws, name) -> bool:
         self.folder = os.path.join(ws, name)
         self.content_folder = os.path.join(ws, name, CONTENT_FOLDER)
+        self.temp_folder = os.path.join(ws, name, TEMP_FOLDER)
         self.name = name
 
         if not os.path.exists(self.folder):
@@ -321,6 +400,9 @@ class Task:
         
         if not os.path.exists(self.content_folder):
             os.mkdir(self.content_folder)
+
+        if not os.path.exists(self.temp_folder):
+            os.mkdir(self.temp_folder)
         
         status_file_path = os.path.join(self.folder, STATUS)
         if not os.path.exists(status_file_path):
@@ -428,10 +510,11 @@ class Task:
                         if info.volume_index > 0:
                             continue
                         print(f'Extracting [{file_name}], media ratio {info.media_ratio * 100:.1f}%, file count {info.file_count}...')
-                        if not extract(file_path, self.content_folder, info.password):
+                        success, extracted = extract(file_path, self.content_folder, info.password, self.temp_folder)
+                        if not success:
                             print(f'Failed extracting file [{file_name}].')
                             return False
-                        else:
+                        if extracted:
                             files_extracted = True
             
             for file_path in to_remove:
@@ -446,8 +529,8 @@ class Task:
             print(f'Cannot perform copy when status is [{self.status}].')
             return False
         
-        category_folder = os.path.join(DEST_FOLDER_ROOT, self.category)
-        if not os.path.isdir(category_folder):
+        category_folder = CATEGORIES.get(self.category, '')
+        if category_folder == '':
             print(f'Category not exist: {self.category}')
             return False
         
@@ -458,7 +541,7 @@ class Task:
             print(f'Name already exists as a file: {dest_folder}')
             return False
         
-        print('Copying files to NAS...')
+        print('Copying files to category folder...')
         for file in os.listdir(self.content_folder):
             file_path = os.path.join(self.content_folder, file)
             #print(f'Copying [{file}]...')
@@ -499,6 +582,52 @@ class Task:
             return False
 
 # Returns whether need again
+def ensure_executables() -> bool:
+    if not execute(f'{SEVENZIP_PATH}', True):
+        print(f'Error: 7z executable ({SEVENZIP_PATH}) not available. You may set 7z path in SEVENZIP_PATH environment variable.')
+        return False
+    
+    if not execute(f'{os.path.join(MEGACMD_FOLDER, "mega-help")}', True):
+        print(f'Warning: MEGAcmd not found (current folder: {MEGACMD_FOLDER}). Mega links cannot work. You may set MEGAcmd folder in MEGACMD_FOLDER environment variable.')
+    
+    if not execute('qbt', True):
+        print('Warning: qbt not found. Magnet links cannot work.')
+    
+    if not execute('bypy -h', True):
+        print('Warning: bypy not found. Baidu share links cannot work.')
+    
+    return True
+
+def read_categories() -> bool:
+    file_path = os.path.join(WORKSPACE, 'categories.txt')
+    if not os.path.isfile(file_path):
+        print(f'"categories.txt" not found in workspace: {WORKSPACE}. Please create one and list categories.')
+        print('Each line in this file should be "CATEGORY:PATH". e.g. "Anime:/mnt/nas/anime"')
+        return False
+    file = open(file_path, encoding='utf-8')
+    lines = file.readlines()
+    file.close()
+
+    for line in lines:
+        if line.strip() == '':
+            continue
+        pos = line.find(':')
+        if pos == -1 or pos == len(line) - 1:
+            print(f'Error reading category line: {line}')
+            print('Each line should be "CATEGORY:FOLDER". e.g. "Anime:/mnt/nas/anime"')
+            return False
+        cat = line[:pos].strip()
+        folder = line[pos + 1:].strip()
+        if cat == '':
+            print(f'Missing category name in line: {line}')
+            return False
+        if not os.path.isdir(folder):
+            print(f'Folder not exist in category line: {line}')
+            return False
+        CATEGORIES[cat] = folder
+    print(f'Successfully read {len(CATEGORIES)} categories.')
+    return True
+
 def task_operations(task: Task) -> bool:
     print('==============================================')
     print(f'Selected task: {task.name}')
@@ -617,10 +746,20 @@ def get_current_tasks() -> list:
 def new_task() -> Task:
     task = Task()
     while True:
-        name = input('Enter new ecchi name: ')
+        name = input('Enter name of the new task (this will be its folder name): ')
         if os.path.exists(os.path.join(WORKSPACE, name)):
             print('Task with this name already exists.')
             continue
+
+        invalid = False
+        for char in ':/\\|*?"<>':
+            if char in name:
+                print('Name invalid for file. Please note that special characters like :/\\|*?"<> are not allowed.')
+                invalid = True
+                break
+        if invalid:
+            continue
+
         try:
             os.mkdir(os.path.join(WORKSPACE, name))
         except:
@@ -629,50 +768,36 @@ def new_task() -> Task:
 
         break
 
-    task.initialize_new(WORKSPACE, name, input('Enter ecchi URL: '), prompt_for_category()) # Assuming not failing
+    task.initialize_new(WORKSPACE, name, input('Enter download URL: '), prompt_for_category()) # Assuming not failing
     return task
 
-# SEVENZIP_PATH = '7z'
-# print(get_archive_info('C:\\Users\\wjw11\\Downloads\\gecchi_ws\\兄.7z'))
-# exit(0)
-
 # Check args
-if len(sys.argv) < 3:
-    print('Usage: gecchi.py [workspace] [dest_folder_root]')
+if len(sys.argv) < 2:
+    print('Usage: gecchi.py [workspace]')
     exit(-1)
 
 WORKSPACE = sys.argv[1]
-DEST_FOLDER_ROOT = sys.argv[2]
 if not os.path.isdir(WORKSPACE):
     print(f'Provided workspace does not exist: {WORKSPACE}')
     exit(-1)
-if not os.path.isdir(DEST_FOLDER_ROOT):
-    print(f'Provided dest folder root does not exist: {DEST_FOLDER_ROOT}')
+if not read_categories():
     exit(-1)
 
 # Check environment
-print('NOTE: You can set 7z and mega path by setting SEVENZIP_PATH and MEGACMD_FOLDER environment variables.')
 if os.name == 'nt':
-    SEVENZIP_PATH = '7z.exe'
+    SEVENZIP_PATH = os.environ.get('SEVENZIP_PATH', '7z.exe')
 else:
-    SEVENZIP_PATH = '7zz'
+    SEVENZIP_PATH = os.environ.get('SEVENZIP_PATH', '7zz')
 
-MEGACMD_FOLDER = ''
+MEGACMD_FOLDER = os.environ.get('MEGACMD_FOLDER', '')
+
+if not ensure_executables():
+    exit(-1)
 
 BDUSS = os.environ.get('BDUSS', '')
 STOKEN = os.environ.get('STOKEN', '')
 if BDUSS == '' or STOKEN == '':
-    print('WARNING: "BDUSS" or "STOKEN" environment variable not set. Baidu download will be unavailable.')
-
-env_7z_path = os.environ.get('SEVENZIP_PATH', '')
-if env_7z_path != '':
-    SEVENZIP_PATH = env_7z_path
-    print(f'Using 7z path from env: {env_7z_path}')
-
-env_mega_path = os.environ.get('MEGACMD_FOLDER', '')
-if env_mega_path != '':
-    MEGACMD_FOLDER = env_mega_path
-    print(f'Using megacmd folder path from env: {env_mega_path}')
+    print('Warning: "BDUSS" or "STOKEN" environment variable not set. Baidu download will be unavailable.')
 
 # Print tasks first
 tasks = get_current_tasks()
@@ -685,7 +810,10 @@ else:
         print(f'{i + 1}: [{tasks[i].status}] {tasks[i].name}')
         
 while True:
-    text = input(f'Select a task to check (1 ~ {len(tasks)}) or enter nothing for a new task: ')
+    if len(tasks) == 0:
+        text = ''
+    else:
+        text = input(f'Select a task to check (1 ~ {len(tasks)}) or enter nothing for a new task: ')
     if text == '':
         task = new_task()
         break
