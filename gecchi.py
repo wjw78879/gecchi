@@ -5,6 +5,7 @@ import sys
 import json
 import time
 import datetime
+from baidu_share import BaiDuPan
 from dataclasses import dataclass
 
 STATUS = 'STATUS'
@@ -18,10 +19,11 @@ STATUS_DONE = 'Done'
 
 CONTENT_FOLDER = 'content'
 
-PASSWORDS = ['⑨']
+PASSWORDS = ['⑨', '米粒儿']
 #ARCHIVE_FORMATS = ['.jpg', '.7z', '.zip', '.rar']
 MEDIA_FORMATS = ['.jpg', '.jpeg', '.png', '.mp4', '.mkv', '.mp3', '.wav', '.apk', '.zip', '.7z', '.rar']
 MEDIA_RATIO_THRESHOLD = 0.5
+ARCHIVE_FILECOUNT_THRESHOLD = 10
 
 @dataclass
 class ArchiveInfo:
@@ -30,6 +32,7 @@ class ArchiveInfo:
     password: str = ''
     volumes: int = -1
     volume_index: int = -1
+    file_count: int = 0
     media_ratio: float = 0.0
 
 @dataclass
@@ -163,7 +166,32 @@ def download_bt(magnet_link: str, bt_hash: str, folder: str) -> bool:
             delete_bt(bt_hash)
             return True
         print(f'{info.state}|{format_bytes(info.downloaded_size)}/{format_bytes(info.size)}|{info.progress * 100:.1f}%|{format_bytes(info.speed)}/s|ETA {datetime.timedelta(seconds=info.eta)}|Active {datetime.timedelta(seconds=info.time_active)}')
+
+def download_baidu(url: str, name: str, folder: str) -> bool:
+    print('Making remote dir...')
+    if not execute(f'bypy mkdir "{name}"'):
+        print('Failed making dir. Maybe bypy is not available?')
+        return False
+
+    print('Transferring share...')
+    bd = BaiDuPan(BDUSS, STOKEN)
+    path = f'/apps/bypy/{name}/'
+    pos = url.find('?pwd=')
+    if pos != -1:
+        res = bd.saveShare(url[:pos], url[pos + 5:], path)
+    else:
+        res = bd.saveShare(url, None, path)
+    if res['errno'] != 0:
+        print('Failed transferring Baidu files. Info: ' + str(res))
+        return False
     
+    print('Downloading files...')
+    if not execute(f'bypy downdir "{name}" "{folder}"'):
+        return False
+    
+    print('Download finished, but there might be errors.')
+    return True
+
 def get_archive_info(file: str) -> ArchiveInfo:
     ret = ArchiveInfo()
     # For now, allow any file extension
@@ -185,44 +213,56 @@ def get_archive_info(file: str) -> ArchiveInfo:
                 ret.is_archive = False
                 return ret
             
-        ret.is_archive = True
         ret.password_matched = True
         ret.password = pswd
-
-        # extract info
-        lines = result.stdout.splitlines()
-        splitters = []
-        for i in range(len(lines)):
-            if lines[i].startswith('Volumes = '):
-                ret.volumes = int(lines[i][10:])
-            elif lines[i].startswith('Volume Index = '):
-                ret.volume_index = int(lines[i][15:])
-            elif lines[i].startswith('----------'):
-                splitters.append(i)
-        
-        total_size = 0
-        media_size = 0
-        if len(splitters) >= 2:
-            for i in range(splitters[0] + 1, splitters[1]):
-                if lines[i][20] == 'D':
-                    continue # Is directory
-
-                size = int(lines[i][25:].split()[0])
-
-                total_size += size
-                for ext in MEDIA_FORMATS:
-                    if lines[i].endswith(ext):
-                        media_size += size
-                        break
-        
-        if total_size == 0:
-            ret.media_ratio = 0
-        else:
-            ret.media_ratio = media_size / total_size
-        return ret
-
+        break
+    
     ret.is_archive = True
-    ret.password_matched = False
+    if not ret.password_matched:
+        while True:
+            pswd = input(f'Please enter password for archive [{file}], or "skip" to skip extracting: ')
+            if pswd == 'skip':
+                return ret
+            result = subprocess.run(f'"{SEVENZIP_PATH}" l "{file}" -p"{pswd}"', capture_output=True, text=True, shell=True)
+            if result.returncode == 0 or result.stderr.find('Wrong password') == -1:
+                print('Password correct.')
+                ret.password_matched = True
+                ret.password = pswd
+                PASSWORDS.append(pswd) # Add to global password list if success
+                break
+            print('Password incorect, please try again.')
+
+    # extract info
+    lines = result.stdout.splitlines()
+    splitters = []
+    for i in range(len(lines)):
+        if lines[i].startswith('Volumes = '):
+            ret.volumes = int(lines[i][10:])
+        elif lines[i].startswith('Volume Index = '):
+            ret.volume_index = int(lines[i][15:])
+        elif lines[i].startswith('----------'):
+            splitters.append(i)
+    
+    total_size = 0
+    media_size = 0
+    if len(splitters) >= 2:
+        for i in range(splitters[0] + 1, splitters[1]):
+            if lines[i][20] == 'D':
+                continue # Is directory
+
+            ret.file_count += 1
+            size = int(lines[i][25:].split()[0])
+
+            total_size += size
+            for ext in MEDIA_FORMATS:
+                if lines[i].endswith(ext):
+                    media_size += size
+                    break
+    
+    if total_size == 0:
+        ret.media_ratio = 0
+    else:
+        ret.media_ratio = media_size / total_size
     return ret
 
 def extract(file: str, folder: str, password: str) -> bool:
@@ -305,6 +345,14 @@ class Task:
         if os.path.exists(self.folder):
             shutil.rmtree(self.folder)
 
+    def reset(self):
+        if os.path.exists(self.folder):
+            shutil.rmtree(self.folder)
+        os.mkdir(self.folder)
+        self.set_status(STATUS_UNKNOWN)
+        self.set_url(self.url)
+        self.set_category(self.category)
+
     def set_status(self, status):
         self.status = status
         write_file(self.folder, STATUS, status)
@@ -323,8 +371,11 @@ class Task:
             return False
         
         # Determine type of link
-        if self.url.startswith('https://mega.nz'):
+        if self.url.startswith('https://mega.nz/folder/'):
             if not download_mega(self.url, self.content_folder):
+                return False
+        elif self.url.startswith('https://pan.baidu.com/s/'):
+            if not download_baidu(self.url, self.name, self.content_folder):
                 return False
         elif self.url.startswith('magnet:'):
             if not download_bt_magnet_link(self.url, self.content_folder):
@@ -351,6 +402,7 @@ class Task:
             if len(files) == 1:
                 single_folder_path = os.path.join(self.content_folder, files[0])
                 if os.path.isdir(single_folder_path):
+                    print(f'Expanding single folder [{files[0]}]...')
                     p = os.path.join(self.content_folder, '_SINGLE_FOLDER_')
                     shutil.move(single_folder_path, p) # rename folder, to avoid the inner files have same name
                     for f in os.listdir(p):
@@ -365,28 +417,21 @@ class Task:
                 if os.path.isfile(file_path):
                     info = get_archive_info(file_path)
                     if info.is_archive:
-                        if info.media_ratio < MEDIA_RATIO_THRESHOLD:
-                            print(f'Not extracting [{file_name}], media ratio {info.media_ratio * 100:.1f}%')
+                        if not info.password_matched:
+                            print(f'Skipping extracting archive [{file_name}]. Password unknown.')
+                            continue
+                        if info.media_ratio < MEDIA_RATIO_THRESHOLD and info.file_count > ARCHIVE_FILECOUNT_THRESHOLD:
+                            print(f'Not extracting [{file_name}], media ratio {info.media_ratio * 100:.1f}%, file count {info.file_count}')
                             continue
                         to_remove.append(file_path)
                         if info.volume_index > 0:
                             continue
-                        if info.password_matched:
-                            print(f'Extracting [{file_name}], media ratio {info.media_ratio * 100:.1f}%...')
-                            if not extract(file_path, self.content_folder, info.password):
-                                print(f'Failed extracting file [{file_name}].')
-                                return False
-                            else:
-                                files_extracted = True
+                        print(f'Extracting [{file_name}], media ratio {info.media_ratio * 100:.1f}%, file count {info.file_count}...')
+                        if not extract(file_path, self.content_folder, info.password):
+                            print(f'Failed extracting file [{file_name}].')
+                            return False
                         else:
-                            while True:
-                                pswd = input(f'Please enter password for archive [{file_name}], or "skip" to skip extracting: ')
-                                if pswd == 'skip':
-                                    break
-                                if extract(file_path, self.content_folder, pswd):
-                                    files_extracted = True
-                                    break
-                                print('Password incorect, please try again.')
+                            files_extracted = True
             
             for file_path in to_remove:
                 #os.remove(file_path)
@@ -475,11 +520,12 @@ def task_operations(task: Task) -> bool:
     print('3. Set URL')
     print('4. Set category')
     print('5. Set status')
-    print('6. Delete')
-    print('7. Exit')
+    print('6. Reset')
+    print('7. Delete')
+    print('8. Exit')
     print('')
 
-    text = input('Select one option (1 ~ 6), default 1 (Run/Resume): ')
+    text = input('Select one option (1 ~ 8), default 1 (Run/Resume): ')
     if text == '1' or text == '':
         if task.run():
             print('Gecchi success!')
@@ -534,6 +580,13 @@ def task_operations(task: Task) -> bool:
             print('Cancel setting status.')
             return True
     elif text == '6':
+        if input('This will remove all current temp files and reset state. Confirm? (y/N): ') == 'y':
+            task.reset()
+            print('Task reset.')
+        else:
+            print('Cancel reset.')
+        return True
+    elif text == '7':
         if input('Enter "y" to confirm delete: ') == 'y':
             task.delete()
             print('Task deleted.')
@@ -541,7 +594,7 @@ def task_operations(task: Task) -> bool:
         else:
             print('Cancel delete.')
             return True
-    elif text == '7':
+    elif text == '8':
         print('Exitting.')
         return False
     else:
@@ -604,6 +657,11 @@ else:
     SEVENZIP_PATH = '7zz'
 
 MEGACMD_FOLDER = ''
+
+BDUSS = os.environ.get('BDUSS', '')
+STOKEN = os.environ.get('STOKEN', '')
+if BDUSS == '' or STOKEN == '':
+    print('WARNING: "BDUSS" or "STOKEN" environment variable not set. Baidu download will be unavailable.')
 
 env_7z_path = os.environ.get('SEVENZIP_PATH', '')
 if env_7z_path != '':
